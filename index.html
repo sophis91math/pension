@@ -42,6 +42,10 @@ hr{border:0; border-top:1px solid var(--line); margin:16px 0}
 .chips{display:flex; flex-wrap:wrap; gap:6px; margin-top:6px}
 .chips button{font:inherit; font-size:12.5px; border:1px solid var(--line); background:var(--surface); color:var(--ink); border-radius:999px; padding:3px 10px; cursor:pointer}
 .chips button:hover{border-color:var(--accent); color:var(--accent)}
+.tabs{display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:-4px}
+.tabs button{font:inherit; font-weight:700; font-size:14.5px; background:none; border:0; border-bottom:3px solid transparent; color:var(--muted); padding:8px 14px; cursor:pointer}
+.tabs button[aria-selected="true"]{color:var(--accent); border-bottom-color:var(--accent)}
+.money{font-size:24px}
 .results{display:flex; flex-direction:column; gap:16px}
 .card{background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:18px 20px}
 .card h3{font-family:var(--font-display); font-size:18px; margin:0 0 12px}
@@ -108,13 +112,25 @@ footer a{color:var(--accent)}
       <small>교원 명예퇴직은 보통 2월 말 또는 8월 말입니다.</small>
       <div class="chips" id="chips"></div>
     </div>
+    <div class="field">
+      <label for="pay">퇴직 당시 월봉급액 (본봉, 원)</label>
+      <input type="number" id="pay" value="6205700" min="0" step="100">
+      <small>명예퇴직수당 계산용. 급여명세서의 '본봉'을 넣으세요(수당 제외). 예시값은 2026년 교원 봉급표 40호봉 6,205,700원이며, 근속가봉이 있으면 더한 금액을 넣습니다. 명퇴 시점에 호봉이 오르면 그때 본봉 기준입니다.</small>
+    </div>
   </form>
 
-  <div class="results" id="out"></div>
+  <div class="results">
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" id="tab-pension" aria-selected="true">정년 · 연금 개시</button>
+      <button type="button" role="tab" id="tab-allowance" aria-selected="false">명예퇴직수당</button>
+    </div>
+    <div class="results" id="out"></div>
+    <div class="results" id="out2" hidden></div>
+  </div>
 </div>
 
 <footer>
-  <p>근거: 교육공무원법 제47조(정년), 공무원연금법 제43조(퇴직연금·조기퇴직연금), 공무원연금법 부칙(2000.12.30. 법률 제6328호 제10조, 2015.6.22. 개정 부칙 및 2018.3.20. 전부개정 부칙 제11조)과 공무원연금공단 연금수급 안내. 재직기간 계산은 임용일부터 퇴직일까지를 개월 단위로 셉니다. 휴직·합산 미반납 기간 등 개인 사정은 반영하지 않으므로, 확정 날짜는 <a href="https://www.geps.or.kr" target="_blank" rel="noopener">공무원연금공단(geps.or.kr)</a>의 퇴직급여 예상액 조회나 상담(1588-4321)으로 확인하세요.</p>
+  <p>근거: 교육공무원법 제47조(정년), 공무원연금법 제43조(퇴직연금·조기퇴직연금), 공무원연금법 부칙(2000.12.30. 법률 제6328호 제10조, 2015.6.22. 개정 부칙 및 2018.3.20. 전부개정 부칙 제11조)과 공무원연금공단 연금수급 안내. 명예퇴직수당은 국가공무원법 제74조의2와 「국가공무원 명예퇴직수당 등 지급 규정」 별표 1(호봉제 월봉급액 68% 적용)을 따르며, 실제 지급액은 시·도교육청 공고와 예산에 따라 달라질 수 있습니다. 재직기간 계산은 임용일부터 퇴직일까지를 개월 단위로 셉니다. 휴직·합산 미반납 기간 등 개인 사정은 반영하지 않으므로, 확정 날짜는 <a href="https://www.geps.or.kr" target="_blank" rel="noopener">공무원연금공단(geps.or.kr)</a>의 퇴직급여 예상액 조회나 상담(1588-4321)으로 확인하세요.</p>
 </footer>
 </div>
 <script>
@@ -350,10 +366,113 @@ function render(){
   out.innerHTML = html;
 }
 
-$('f').addEventListener('input', render);
+
+// 정년잔여월수: 퇴직일 다음 달 1일부터 정년퇴직일까지, 15일 이상 남는 날은 1개월로
+function remainMonths(retire, retireAt){
+  const start = firstOfNextMonth(retire);
+  if (start > retireAt) return 0;
+  let n = serviceMonths(start, retireAt);
+  const anchor = D(start.getFullYear(), start.getMonth() + 1 + n, 1);
+  if (retireAt >= anchor){ const days = Math.round((retireAt - anchor) / 864e5) + 1; if (days >= 15) n++; }
+  return n;
+}
+function allowanceCalc(pay, n){
+  const factor = n <= 60 ? n : (n <= 120 ? 60 + (n - 60) / 2 : 90);
+  const amount = Math.floor(pay * 0.68 * 0.5 * factor / 10) * 10;
+  return { factor, amount, band: n <= 60 ? '1년 이상 5년 이내' : (n <= 120 ? '5년 초과 10년 이내' : '10년 초과 (10년분으로 고정)') };
+}
+const won = v => v.toLocaleString('ko-KR') + '원';
+const eok = v => v >= 1e8 ? `약 ${(v/1e8).toFixed(2)}억 원` : `약 ${Math.round(v/1e4).toLocaleString('ko-KR')}만 원`;
+
+function render2(){
+  const out = $('out2');
+  const birth = parse($('birth').value), appoint = parse($('appoint').value);
+  const limit = parseInt($('limit').value,10) || 62;
+  const extra = Math.max(0, parseInt($('extra').value,10) || 0);
+  const pre95 = $('pre95').checked;
+  const pay = Math.max(0, parseInt($('pay').value,10) || 0);
+  if (!birth || !appoint || appoint <= birth){ out.innerHTML = '<div class="card"><p class="err">생년월일과 최초 임용일을 확인하세요.</p></div>'; return; }
+  if (!pay){ out.innerHTML = '<div class="card"><p class="err">월봉급액(본봉)을 입력하세요.</p></div>'; return; }
+  const retireAt = teacherRetireDate(ageReachDate(birth, limit));
+  const t0 = (()=>{ const t = new Date(); return D(t.getFullYear(), t.getMonth()+1, t.getDate()); })();
+  let html = '';
+
+  const retire = parse($('retire').value);
+  if (retire && retire >= appoint && retire < retireAt){
+    const n = remainMonths(retire, retireAt);
+    const svc = serviceMonths(appoint, retire) + extra;
+    const ok = svc >= 240 && n >= 12;
+    const a = allowanceCalc(pay, n);
+    const p = pensionStart({ birth, appoint, retire, extraMonths: extra, pre95Career: pre95 });
+    html += `<section class="card"><h3>명예퇴직수당 ${ok ? '<span class="pill ok">신청 요건 충족</span>' : '<span class="pill warn">신청 요건 미충족</span>'}</h3>
+      <div class="big">
+        <div class="tile"><div class="k">예상 수당 (세전)</div><div class="v money">${ok ? won(a.amount) : '0원'}</div><div class="s">${ok ? eok(a.amount) : '요건을 채우지 못해 지급되지 않습니다'}</div></div>
+        <div class="tile"><div class="k">정년 잔여기간</div><div class="v">${n}개월</div><div class="s">${fmt(firstOfNextMonth(retire))} ~ ${fmt(retireAt)}</div></div>
+        <div class="tile"><div class="k">재직기간</div><div class="v">${ymText(svc)}</div><div class="s">퇴직 예정일 ${fmt(retire)} 기준</div></div>
+      </div>
+      <div class="reason"><b>산식 (${a.band})</b><br>
+        ${won(pay)} × 68% × 1/2 × ${a.factor % 1 ? a.factor.toFixed(1) : a.factor}개월 = ${won(a.amount)}
+        <span class="muted">(10원 미만 버림)</span></div>
+      ${!ok ? `<div class="note">${svc < 240 ? `재직 20년 이상이어야 합니다(현재 ${ymText(svc)}). ` : ''}${n < 12 ? '정년까지 1년 이상 남아 있어야 합니다.' : ''}</div>` : ''}
+      ${p.eligible && p.start ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">이 날짜에 명퇴하면 퇴직연금은 ${fmtYM(p.start)}분부터(만 ${ageOn(birth, p.start)}세) 나옵니다. 연금이 나오기 전 소득 공백 ${(()=>{const g=serviceMonths(addDays(retire,1), addDays(p.start,-1)); return g>0? ymText(g) : '없음';})()}을 수당으로 버틸 수 있는지 함께 보세요.</p>` : ''}
+    </section>`;
+  } else if (retire) {
+    html += `<section class="card"><h3>명예퇴직수당</h3><p class="err">명퇴 예정일은 임용일 이후, 정년퇴직일(${fmt(retireAt)}) 이전이어야 합니다.</p></section>`;
+  }
+
+  // 시점별 비교표: 오늘 이후 2월 말 / 8월 말
+  const rows = [];
+  for (let y = t0.getFullYear(); y <= retireAt.getFullYear(); y++){
+    [lastDayOf(y,2), D(y,8,31)].forEach(d => {
+      if (d <= t0 || d >= retireAt) return;
+      const n = remainMonths(d, retireAt); if (n < 12) return;
+      const svc = serviceMonths(appoint, d) + extra;
+      const p = pensionStart({ birth, appoint, retire: d, extraMonths: extra, pre95Career: pre95 });
+      const a = allowanceCalc(pay, n);
+      const gap = p.eligible && p.start ? serviceMonths(addDays(d,1), addDays(p.start,-1)) : null;
+      rows.push({ d, n, svc, ok: svc >= 240, a, p, gap });
+    });
+  }
+  const sel = retire ? +retire : null;
+  html += `<section class="card"><h3>명퇴 시점별 비교</h3>
+    <p class="muted" style="margin:0 0 10px;font-size:13.5px">교원 명예퇴직일(2월 말·8월 말) 기준, 정년까지 1년 이상 남은 시점만 보여 줍니다. 같은 본봉(${won(pay)})으로 계산했으므로 승급분은 반영되지 않습니다. 행을 누르면 그 날짜로 바뀝니다.</p>
+    <div class="tbl-wrap"><table><thead><tr><th>명퇴일</th><th>나이</th><th>재직</th><th>잔여</th><th>명퇴수당</th><th>연금 개시</th><th>소득 공백</th></tr></thead><tbody>
+    ${rows.map(r => `<tr class="${+r.d===sel?'hit':''}" data-d="${r.d.getFullYear()}-${String(r.d.getMonth()+1).padStart(2,'0')}-${String(r.d.getDate()).padStart(2,'0')}" style="cursor:pointer">
+      <td>${r.d.getFullYear()}.${r.d.getMonth()+1}.${r.d.getDate()}</td><td>만 ${ageOn(birth, r.d)}세</td><td>${ymText(r.svc)}</td><td>${r.n}개월</td>
+      <td>${r.ok ? won(r.a.amount) : '<span class="muted">재직 20년 미만</span>'}</td>
+      <td>${r.p.eligible && r.p.start ? fmtYM(r.p.start) : '<span class="muted">일시금</span>'}</td>
+      <td>${r.gap == null ? '-' : (r.gap > 0 ? ymText(r.gap) : '없음')}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">해당하는 명퇴 시점이 없습니다.</td></tr>'}
+    </tbody></table></div></section>`;
+
+  html += `<section class="card"><details><summary>명예퇴직수당 규칙 요약</summary><ul>
+    <li>대상: 재직 20년 이상(공무원연금법상 재직기간), 정년퇴직일까지 1년 이상 남은 교원이 스스로 퇴직하는 경우. 징계·수사 중이거나 다른 명예퇴직수당을 받은 적이 있으면 제외됩니다.</li>
+    <li>정년 잔여기간: 퇴직일 다음 달 1일부터 정년퇴직일까지 월 단위로 세고, 15일 이상 남는 날은 1개월, 15일 미만은 버립니다.</li>
+    <li>잔여 1년 이상 5년 이내: 월봉급액 × 68% × 1/2 × 잔여월수</li>
+    <li>잔여 5년 초과 10년 이내: 월봉급액 × 68% × 1/2 × {60 + (잔여월수 − 60) ÷ 2}</li>
+    <li>잔여 10년 초과: 잔여 10년인 사람과 같은 금액(90개월분)</li>
+    <li>월봉급액은 퇴직 당시 본봉이며, 호봉제 공무원은 봉급표 금액의 68%를 적용합니다. 휴직 중 명퇴하면 휴직 전 마지막 호봉 기준입니다.</li>
+    <li>명예퇴직수당은 퇴직소득으로 세금이 붙고, 실제 지급은 교육청 예산 범위에서 결정됩니다. 재임용 시 환수될 수 있습니다.</li>
+  </ul></details></section>`;
+  out.innerHTML = html;
+}
+
+let tab = location.hash === '#allowance' ? 'allowance' : 'pension';
+function showTab(t){
+  tab = t;
+  $('tab-pension').setAttribute('aria-selected', t === 'pension');
+  $('tab-allowance').setAttribute('aria-selected', t === 'allowance');
+  $('out').hidden = t !== 'pension'; $('out2').hidden = t !== 'allowance';
+  try { history.replaceState(null, '', '#' + t); } catch(e) {}
+}
+$('tab-pension').addEventListener('click', () => showTab('pension'));
+$('tab-allowance').addEventListener('click', () => showTab('allowance'));
+$('out2').addEventListener('click', e => { const tr = e.target.closest('tr[data-d]'); if (tr){ $('retire').value = tr.dataset.d; renderAll(); } });
+function renderAll(){ render(); render2(); }
+$('f').addEventListener('input', renderAll);
 $('f').addEventListener('submit', e => e.preventDefault());
-$('chips').addEventListener('click', e => { const b = e.target.closest('button'); if (b){ $('retire').value = b.dataset.d; render(); } });
-render();
+$('chips').addEventListener('click', e => { const b = e.target.closest('button'); if (b){ $('retire').value = b.dataset.d; renderAll(); } });
+showTab(tab);
+renderAll();
 </script>
 </body>
 </html>
