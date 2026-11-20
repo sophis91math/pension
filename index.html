@@ -134,15 +134,42 @@ footer a{color:var(--accent)}
       <input type="number" id="pay" value="6205700" min="0" step="100">
       <small>명예퇴직수당 계산에 쓰는 값입니다. 급여명세서의 본봉(수당 제외)과 다르면 직접 고쳐 넣어도 됩니다.</small>
     </div>
+    <hr>
+    <h2>연금 예상액</h2>
+    <div class="field">
+      <label for="hobNow">현재(2026년) 호봉</label>
+      <select id="hobNow"></select>
+      <small>처음엔 임용연도로 짐작한 값(신규 9호봉 + 근무연수)이 들어갑니다. 급여명세서의 호봉으로 바꿔 주세요.</small>
+    </div>
+    <div class="field">
+      <label for="contrib">이번 달 연금 기여금 (원)</label>
+      <input type="number" id="contrib" placeholder="급여명세서 '기여금' 금액" min="0" step="10">
+      <small>기여금은 기준소득월액의 9%라서, 이 값이 있으면 기준소득월액을 정확히 알 수 있습니다. 비워 두면 본봉의 1.33배로 추정합니다.</small>
+    </div>
+    <div class="field">
+      <label for="avgK">평균기준소득월액 직접 입력 (선택)</label>
+      <input type="number" id="avgK" placeholder="공단 예상퇴직급여 조회값" min="0" step="100">
+    </div>
+    <div class="field">
+      <label for="avgB">1기간 평균보수월액 직접 입력 (선택)</label>
+      <input type="number" id="avgB" placeholder="2009년 이전 근무자만" min="0" step="100">
+    </div>
+    <div class="field">
+      <label for="redist">소득재분배 적용비율</label>
+      <input type="number" id="redist" value="1" min="0.81" max="3" step="0.01">
+      <small>2016년 이후 재직분의 지급률 중 1%에 곱하는 비율(0.81~3.0). 공무원 평균보다 소득이 높으면 1보다 작아집니다. 모르면 1로 두세요.</small>
+    </div>
   </form>
 
   <div class="results">
     <div class="tabs" role="tablist">
       <button type="button" role="tab" id="tab-pension" aria-selected="true">정년 · 연금 개시</button>
       <button type="button" role="tab" id="tab-allowance" aria-selected="false">명예퇴직수당</button>
+      <button type="button" role="tab" id="tab-amount" aria-selected="false">연금 예상액</button>
     </div>
     <div class="results" id="out"></div>
     <div class="results" id="out2" hidden></div>
+    <div class="results" id="out3" hidden></div>
   </div>
 </div>
 
@@ -193,6 +220,9 @@ function serviceMonths(start, end) {
   if (e.getDate() < start.getDate()) mo--;
   return Math.max(0, mo);
 }
+// 공무원연금법 제25조: 재직기간은 임명된 날이 속하는 달부터 퇴직한 날의 전날이 속하는 달까지의 월수
+function monthSpan(start, lastDay){ if (lastDay < start) return 0; return (lastDay.getFullYear()-start.getFullYear())*12 + lastDay.getMonth()-start.getMonth() + 1; }
+const tenure = (appoint, retire) => monthSpan(appoint, addDays(retire, -1));
 const ymText = mo => `${Math.floor(mo / 12)}년 ${mo % 12}개월`;
 
 // 1996~2009 임용자: 2015.6.22 개정 공무원연금법 부칙(퇴직연도별)
@@ -216,7 +246,7 @@ function agePre96(y) {
  * @returns {object} { group, eligible, immediate, pensionAge, start, reason, early }
  */
 function pensionStart({ birth, appoint, retire, extraMonths = 0, pre95Career = false }) {
-  const total = serviceMonths(appoint, retire) + extraMonths;
+  const total = tenure(appoint, retire) + extraMonths;
   const pre96 = appoint < D(1996, 1, 1) || pre95Career;
   const group = pre96 ? 'pre96' : (appoint >= D(2010, 1, 1) ? 'post2010' : 'y9609');
   const retireYear = retire.getFullYear();
@@ -225,14 +255,14 @@ function pensionStart({ birth, appoint, retire, extraMonths = 0, pre95Career = f
 
   if (group === 'pre96') {
     const cut = D(2000, 12, 31);
-    const s2000 = serviceMonths(appoint, retire < cut ? retire : cut) + extraMonths;
+    const s2000 = monthSpan(appoint, retire <= cut ? addDays(retire, -1) : cut) + extraMonths;
     res.s2000 = s2000;
     if (s2000 >= 240) {
       res.immediate = true;
       res.reason = '2000.12.31 기준 재직 20년 이상 → 나이와 관계없이 퇴직 다음 달부터 지급';
     } else {
       const need = 2 * (240 - s2000);
-      const after = retire >= D(2001, 1, 1) ? serviceMonths(maxDate(appoint, D(2001, 1, 1)), retire) : 0;
+      const after = retire >= D(2001, 1, 1) ? monthSpan(maxDate(appoint, D(2001, 1, 1)), addDays(retire, -1)) : 0;
       res.need = need; res.after = after;
       if (after >= need) {
         res.immediate = true;
@@ -331,7 +361,7 @@ function render(){
   const today = new Date(); const t0 = D(today.getFullYear(), today.getMonth()+1, today.getDate());
   const reach = ageReachDate(birth, limit);
   const retireAt = teacherRetireDate(reach);
-  const svc = serviceMonths(appoint, retireAt) + extra;
+  const svc = tenure(appoint, retireAt) + extra;
   const left = serviceMonths(addDays(t0,1), retireAt);
 
   // 빠른 선택 칩: 오늘 이후 정년 전까지의 2월 말/8월 말
@@ -377,6 +407,7 @@ function render(){
     <li><b>1996~2009년 임용자</b>: 퇴직연도에 따라 60세(2016~2021) → 61세(2022~2023) → 62세(2024~2026) → 63세(2027~2029) → 64세(2030~2032) → 65세(2033 이후).</li>
     <li><b>2010년 이후 임용자</b>: 65세.</li>
     <li>재직 10년 이상이어야 퇴직연금, 10년 미만은 퇴직일시금.</li>
+    <li>재직기간은 임용된 날이 속한 달부터 퇴직일 전날이 속한 달까지를 달 단위로 셉니다(공무원연금법 제25조). 예: 1994.5.23 임용 → 1994년 5월이 통째로 1개월.</li>
     <li>연금은 지급 사유가 생긴 날(연령 도달일 또는 퇴직일 중 늦은 날)이 속한 달의 다음 달분부터 지급합니다.</li>
     <li>임용 전 군 복무를 합산받아도 '1995년 이전 임용자'가 되지는 않습니다. 1995년 이전 경력은 군 복무가 아닌 공무원·군인 재직 경력으로 합산받은 경우에 해당합니다.</li>
   </ul></details></section>`;
@@ -417,7 +448,7 @@ function render2(){
   const retire = parse($('retire').value);
   if (retire && retire >= appoint && retire < retireAt){
     const n = remainMonths(retire, retireAt);
-    const svc = serviceMonths(appoint, retire) + extra;
+    const svc = tenure(appoint, retire) + extra;
     const ok = svc >= 240 && n >= 12;
     const a = allowanceCalc(pay, n);
     const p = pensionStart({ birth, appoint, retire, extraMonths: extra, pre95Career: pre95 });
@@ -443,7 +474,7 @@ function render2(){
     [lastDayOf(y,2), D(y,8,31)].forEach(d => {
       if (d <= t0 || d >= retireAt) return;
       const n = remainMonths(d, retireAt); if (n < 12) return;
-      const svc = serviceMonths(appoint, d) + extra;
+      const svc = tenure(appoint, d) + extra;
       const p = pensionStart({ birth, appoint, retire: d, extraMonths: extra, pre95Career: pre95 });
       const a = allowanceCalc(pay, n);
       const gap = p.eligible && p.start ? serviceMonths(addDays(d,1), addDays(p.start,-1)) : null;
@@ -498,18 +529,149 @@ function payTable(){
     <div class="tbl-wrap" style="max-height:360px;overflow-y:auto"><table><thead><tr><th>호봉</th><th>2026년 (확정)</th><th>2027년 (예상)</th><th>차이</th></tr></thead><tbody>${rows.join('')}</tbody></table></div></details></section>`;
 }
 
-let tab = location.hash === '#allowance' ? 'allowance' : 'pension';
+
+// ── 연금 예상액 ──────────────────────────────
+// 2016년 이후 연도별 지급률(%) : 공무원연금법 부칙 (2016 1.878 → 2035 1.7)
+function rate3(y){
+  if (y <= 2020) return 1.878 - 0.022 * (y - 2016);
+  if (y <= 2025) return 1.790 - 0.010 * (y - 2020);
+  if (y <= 2035) return 1.740 - 0.004 * (y - 2025);
+  return 1.700;
+}
+const clampH = h => Math.max(1, Math.min(40, h));
+// 재직 개월을 연도별로 나눔
+function monthsByYear(appoint, retire){
+  const map = {};
+  let cur = D(appoint.getFullYear(), appoint.getMonth()+1, 1);
+  const total = tenure(appoint, retire);
+  for (let i = 0; i < total; i++){
+    const y = cur.getFullYear(); map[y] = (map[y]||0) + 1;
+    cur = D(y, cur.getMonth()+2, 1);
+  }
+  return map;
+}
+function pensionAmount({ appoint, retire, extra, hobNow, Know, avgKOverride, avgBOverride, redist }){
+  const byY = monthsByYear(appoint, retire);
+  const years = Object.keys(byY).map(Number).sort((a,b)=>a-b);
+  // 합산경력은 첫 해 구간에 더함
+  if (extra) byY[years[0]] += extra;
+  // 재직기간 상한 36년(432개월): 뒤쪽부터 제외
+  let total = years.reduce((s,y)=>s+byY[y],0);
+  let over = total - 432;
+  for (let i = years.length-1; over > 0 && i >= 0; i--){ const cut = Math.min(over, byY[years[i]]); byY[years[i]] -= cut; over -= cut; }
+  total = Math.min(total, 432);
+
+  const ry = retire.getFullYear();
+  const hobAt = y => clampH(hobNow + (y - 2026));
+  const KAt = y => Know * PAY2026[hobAt(y)] / PAY2026[clampH(hobNow)];
+  // 평균기준소득월액(2010년 이후, 2026년 화폐가치)
+  let sumK = 0, mK = 0;
+  years.forEach(y => { if (y >= 2010 && byY[y] > 0){ sumK += KAt(y) * byY[y]; mK += byY[y]; } });
+  const A = avgKOverride || (mK ? sumK / mK : 0);
+  // 1기간 평균보수월액: 2007~2009년 호봉의 본봉(2026년 화폐가치)
+  const B = avgBOverride || (PAY2026[hobAt(2007)] + PAY2026[hobAt(2008)] + PAY2026[hobAt(2009)]) / 3;
+
+  let m1 = 0, m2 = 0; const m3 = [];
+  years.forEach(y => { const m = byY[y]; if (!m) return; if (y <= 2009) m1 += m; else if (y <= 2015) m2 += m; else m3.push([y, m]); });
+  const Y1 = m1 / 12;
+  const p1 = m1 ? B * (Math.min(Y1, 20) * 0.025 + Math.max(0, Y1 - 20) * 0.02) : 0;
+  const p2 = A * (m2 / 12) * 0.019;
+  let p3 = 0, cum = m1 + m2;
+  m3.forEach(([y, m]) => {
+    const r = rate3(y) / 100;
+    const inRedist = Math.max(0, Math.min(m, 360 - cum)); // 30년까지만 소득재분배
+    p3 += A * (m/12) * (r - 0.01) + A * redist * (inRedist/12) * 0.01 + A * ((m - inRedist)/12) * 0.01;
+    cum += m;
+  });
+  const monthly = Math.floor((p1 + p2 + p3) / 10) * 10;
+  // 퇴직수당: 평균기준소득월액 × 재직연수 × 비율
+  const ty = total / 12;
+  const sudangRate = ty < 5 ? 0.065 : ty < 10 ? 0.2275 : ty < 15 ? 0.2925 : ty < 20 ? 0.325 : 0.39;
+  const sudang = Math.floor(A * ty * sudangRate / 10) * 10;
+  return { monthly, p1, p2, p3, m1, m2, m3: m3.reduce((s,x)=>s+x[1],0), A, B, total, sudang, sudangRate };
+}
+
+function render3(){
+  const out = $('out3');
+  const birth = parse($('birth').value), appoint = parse($('appoint').value);
+  const limit = parseInt($('limit').value,10) || 62;
+  const extra = Math.max(0, parseInt($('extra').value,10) || 0);
+  const pre95 = $('pre95').checked;
+  if (!birth || !appoint || appoint <= birth){ out.innerHTML = '<div class="card"><p class="err">생년월일과 최초 임용일을 확인하세요.</p></div>'; return; }
+  const hobNow = +$('hobNow').value;
+  const contrib = parseInt($('contrib').value,10) || 0;
+  const Know = contrib ? contrib / 0.09 : PAY2026[hobNow] * 1.33;
+  const avgKOverride = parseInt($('avgK').value,10) || 0;
+  const avgBOverride = parseInt($('avgB').value,10) || 0;
+  const redist = Math.min(3, Math.max(0.81, parseFloat($('redist').value) || 1));
+  const retireAt = teacherRetireDate(ageReachDate(birth, limit));
+  const retire = parse($('retire').value);
+
+  const scen = [];
+  if (retire && retire > appoint && retire < retireAt) scen.push(['명예퇴직', retire]);
+  scen.push(['정년퇴직', retireAt]);
+
+  const cols = scen.map(([name, R]) => {
+    const st = pensionStart({ birth, appoint, retire: R, extraMonths: extra, pre95Career: pre95 });
+    const amt = pensionAmount({ appoint, retire: R, extra, hobNow, Know, avgKOverride, avgBOverride, redist });
+    return { name, R, st, amt };
+  });
+
+  const tiles = cols.map(c => {
+    if (!c.st.eligible) return `<div class="tile alt"><div class="k">${c.name} (${fmt(c.R)})</div><div class="v">퇴직일시금 대상</div><div class="s">재직 10년 미만</div></div>`;
+    const early = c.st.early ? `<div class="s">조기 신청(${fmtYM(c.st.early.earliest)}) 시 ${won(Math.floor(c.amt.monthly * c.st.early.earliestRate / 1000) * 10)} (${c.st.early.earliestRate}%)</div>` : '';
+    return `<div class="tile"><div class="k">${c.name} · ${fmt(c.R)} 퇴직</div><div class="v money">월 ${won(c.amt.monthly)}</div>
+      <div class="s">재직 ${ymText(c.amt.total)} · ${fmtYM(c.st.start)}분부터</div>${early}
+      <div class="s">퇴직수당(일시금) 약 ${won(c.amt.sudang)}</div></div>`;
+  }).join('');
+
+  const rows = cols.filter(c=>c.st.eligible).map(c => `<tr><td>${c.name}</td>
+    <td>${c.amt.m1 ? `${ymText(c.amt.m1)} → ${won(Math.round(c.amt.p1))}` : '-'}</td>
+    <td>${c.amt.m2 ? `${ymText(c.amt.m2)} → ${won(Math.round(c.amt.p2))}` : '-'}</td>
+    <td>${c.amt.m3 ? `${ymText(c.amt.m3)} → ${won(Math.round(c.amt.p3))}` : '-'}</td>
+    <td>${won(c.amt.monthly)}</td></tr>`).join('');
+
+  const a0 = cols[cols.length-1].amt;
+  out.innerHTML = `<section class="card"><h3>퇴직연금 예상액 <span class="pill warn">간이 추정</span></h3>
+    <div class="big">${tiles}</div>
+    <div class="reason">금액은 모두 <b>2026년 화폐가치</b>입니다. 연금은 받기 시작한 뒤 매년 1월 전년도 물가상승률만큼 오릅니다.
+      공단 산정과 달리 근속가봉, 재직기간별 적용비율, 실제 소득재분배 비율은 단순화했으니 몇 % 정도 차이는 날 수 있습니다.</div>
+    ${cols.length > 1 && cols[0].st.eligible && cols[1].st.eligible ? `<p style="margin:12px 0 0;font-size:14px">정년까지 다니면 월 <b>${won(cols[1].amt.monthly - cols[0].amt.monthly)}</b> 더 받습니다(같은 화폐가치 기준).</p>` : ''}
+  </section>
+  <section class="card"><h3>기간별 산정 내역</h3>
+    <div class="tbl-wrap"><table><thead><tr><th></th><th>1기간 (~2009)</th><th>2기간 (2010~2015)</th><th>3기간 (2016~)</th><th>월 연금</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="muted" style="margin:10px 0 0;font-size:13.5px">
+      계산에 쓴 값: 기준소득월액 ${won(Math.round(Know))}${contrib ? ' (기여금 ÷ 9%)' : ' (본봉 × 1.33 추정)'},
+      평균기준소득월액 ${won(Math.round(a0.A))}${avgKOverride ? ' (직접 입력)' : ' (호봉 이력으로 추정)'}${a0.m1 ? `, 1기간 평균보수월액 ${won(Math.round(a0.B))}${avgBOverride ? ' (직접 입력)' : ' (2007~2009년 호봉 본봉으로 추정)'}` : ''}, 소득재분배 적용비율 ${redist}.</p>
+  </section>
+  <section class="card"><details><summary>산식과 가정</summary><ul>
+    <li><b>1기간 (2009.12.31 이전)</b>: 평균보수월액 × (재직 20년까지 연 2.5% + 20년 초과분 연 2%)</li>
+    <li><b>2기간 (2010~2015)</b>: 평균기준소득월액 × 재직연수 × 1.9%</li>
+    <li><b>3기간 (2016 이후)</b>: 평균기준소득월액 × 재직연수 × (연도별 지급률 − 1%) + 소득재분배 평균기준소득월액 × 재직연수(30년까지) × 1%. 지급률은 2016년 1.878%에서 해마다 낮아져 2026년 1.736%, 2035년 이후 1.7%.</li>
+    <li>재직기간은 36년까지만 반영합니다. 퇴직수당은 평균기준소득월액 × 재직연수 × 39%(20년 이상)입니다.</li>
+    <li>추정 방식: 해마다의 기준소득은 현재 기준소득월액에 그 해 호봉과 현재 호봉의 본봉 비율을 곱해 2026년 가치로 맞췄습니다. 재직기간별 적용비율(시행령 부칙 제10조)은 100%로 두었습니다.</li>
+    <li>정확한 금액은 공무원연금공단 홈페이지의 '예상퇴직급여 조회'에서 본인 이력으로 확인하세요. 조회한 평균기준소득월액과 평균보수월액을 위 칸에 넣으면 이 계산기도 그 값으로 계산합니다.</li>
+  </ul></details></section>`;
+}
+
+let tab = ['allowance','amount'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'pension';
 function showTab(t){
   tab = t;
   $('tab-pension').setAttribute('aria-selected', t === 'pension');
   $('tab-allowance').setAttribute('aria-selected', t === 'allowance');
-  $('out').hidden = t !== 'pension'; $('out2').hidden = t !== 'allowance';
+  $('tab-amount').setAttribute('aria-selected', t === 'amount');
+  $('out').hidden = t !== 'pension'; $('out2').hidden = t !== 'allowance'; $('out3').hidden = t !== 'amount';
   try { history.replaceState(null, '', '#' + t); } catch(e) {}
 }
 $('tab-pension').addEventListener('click', () => showTab('pension'));
 $('tab-allowance').addEventListener('click', () => showTab('allowance'));
+$('tab-amount').addEventListener('click', () => showTab('amount'));
 $('out2').addEventListener('click', e => { const tr = e.target.closest('tr[data-d]'); if (tr){ $('retire').value = tr.dataset.d; renderAll(); } });
-function renderAll(){ render(); render2(); }
+$('hobNow').innerHTML = Array.from({length:40},(_,i)=>`<option value="${i+1}">${i+1}호봉</option>`).join('');
+let hobTouched = false;
+$('hobNow').addEventListener('change', () => { hobTouched = true; });
+function guessHob(){ if (hobTouched) return; const a = parse($('appoint').value); if (a) $('hobNow').value = clampH(9 + 2026 - a.getFullYear()); }
+function renderAll(){ guessHob(); render(); render2(); render3(); }
 $('f').addEventListener('input', renderAll);
 $('f').addEventListener('submit', e => e.preventDefault());
 $('chips').addEventListener('click', e => { const b = e.target.closest('button'); if (b){ $('retire').value = b.dataset.d; renderAll(); } });
