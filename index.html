@@ -35,7 +35,7 @@ header p{margin:0; color:var(--muted); max-width:65ch}
 .field{display:flex; flex-direction:column; gap:4px; margin-bottom:14px}
 .field label{font-weight:500; font-size:14px}
 .field small{color:var(--muted); font-size:12.5px; line-height:1.45}
-input[type=date],input[type=number]{font:inherit; color:var(--ink); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px 10px; width:100%}
+input[type=date],input[type=number],select{font:inherit; color:var(--ink); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px 10px; width:100%}
 input:focus-visible,button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
 .check{display:flex; gap:8px; align-items:flex-start; font-size:13.5px; margin-bottom:14px}
 .check input{margin-top:4px}
@@ -114,9 +114,25 @@ footer a{color:var(--accent)}
       <div class="chips" id="chips"></div>
     </div>
     <div class="field">
+      <label for="hobong">명퇴 당시 호봉</label>
+      <div style="display:flex;gap:8px">
+        <select id="hobong" style="flex:1"></select>
+        <select id="payYear" style="flex:1.4">
+          <option value="2026">2026년 봉급표 (확정)</option>
+          <option value="2027">2027년 예상 (+3.9%)</option>
+        </select>
+      </div>
+      <small>호봉과 연도를 고르면 아래 본봉이 채워집니다. 2027년은 정부 예산안 인상률 3.9%를 모든 호봉에 똑같이 붙인 추정치입니다.</small>
+    </div>
+    <div class="field">
+      <label for="gabong">근속가봉 등 더할 금액 (원)</label>
+      <input type="number" id="gabong" value="0" min="0" step="100">
+      <small>40호봉을 넘어 근속가봉을 받고 있으면 급여명세서의 가봉 금액을 넣으세요.</small>
+    </div>
+    <div class="field">
       <label for="pay">퇴직 당시 월봉급액 (본봉, 원)</label>
       <input type="number" id="pay" value="6205700" min="0" step="100">
-      <small>명예퇴직수당 계산용. 급여명세서의 '본봉'을 넣으세요(수당 제외). 예시값은 2026년 교원 봉급표 40호봉 6,205,700원이며, 근속가봉이 있으면 더한 금액을 넣습니다. 명퇴 시점에 호봉이 오르면 그때 본봉 기준입니다.</small>
+      <small>명예퇴직수당 계산에 쓰는 값입니다. 급여명세서의 본봉(수당 제외)과 다르면 직접 고쳐 넣어도 됩니다.</small>
     </div>
   </form>
 
@@ -445,6 +461,7 @@ function render2(){
       <td>${r.gap == null ? '-' : (r.gap > 0 ? ymText(r.gap) : '없음')}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">해당하는 명퇴 시점이 없습니다.</td></tr>'}
     </tbody></table></div></section>`;
 
+  html += payTable();
   html += `<section class="card"><details><summary>명예퇴직수당 규칙 요약</summary><ul>
     <li>대상: 재직 20년 이상(공무원연금법상 재직기간), 정년퇴직일까지 1년 이상 남은 교원이 스스로 퇴직하는 경우. 징계·수사 중이거나 다른 명예퇴직수당을 받은 적이 있으면 제외됩니다.</li>
     <li>정년 잔여기간: 퇴직일 다음 달 1일부터 정년퇴직일까지 월 단위로 세고, 15일 이상 남는 날은 1개월, 15일 미만은 버립니다.</li>
@@ -455,6 +472,30 @@ function render2(){
     <li>명예퇴직수당은 퇴직소득으로 세금이 붙고, 실제 지급은 교육청 예산 범위에서 결정됩니다. 재임용 시 환수될 수 있습니다.</li>
   </ul></details></section>`;
   out.innerHTML = html;
+}
+
+// 2026년 공무원보수규정 별표 11 (유·초·중·고 교원 봉급표), 월지급액
+const PAY2026 = [0,2041500,2103300,2166000,2228500,2291500,2354400,2416600,2478600,2495600,2516700,2538300,2585900,2657500,2773700,2889700,3006200,3121000,3241500,3361200,3481000,3600700,3733600,3865300,3997500,4129400,4261900,4400100,4538000,4682100,4826800,4971100,5115200,5261600,5407500,5553600,5699100,5825700,5952500,6079500,6205700];
+const RAISE2027 = 0.039;
+const pay2027 = h => Math.round(PAY2026[h] * (1 + RAISE2027) / 100) * 100;
+$('hobong').innerHTML = Array.from({length:40},(_,i)=>`<option value="${i+1}"${i===39?' selected':''}>${i+1}호봉</option>`).join('');
+function fillPay(){
+  const h = +$('hobong').value, y = $('payYear').value;
+  const base = y === '2027' ? pay2027(h) : PAY2026[h];
+  $('pay').value = base + Math.max(0, parseInt($('gabong').value,10) || 0);
+}
+['hobong','payYear','gabong'].forEach(id => $(id).addEventListener('input', fillPay));
+['hobong','payYear'].forEach(id => $(id).addEventListener('change', () => { fillPay(); renderAll(); }));
+function payTable(){
+  const h = +$('hobong').value;
+  const rows = [];
+  for (let i = 1; i <= 40; i++){
+    const a = PAY2026[i], b = pay2027(i);
+    rows.push(`<tr class="${i===h?'hit':''}"><td>${i}호봉</td><td>${won(a)}</td><td>${won(b)}</td><td>+${(b-a).toLocaleString('ko-KR')}</td></tr>`);
+  }
+  return `<section class="card"><details><summary>교원 호봉별 본봉표 (2026년 확정 · 2027년 예상)</summary>
+    <p class="muted" style="margin:0 0 8px;font-size:13.5px">2026년 공무원보수규정 별표 11(유·초·중·고 교원 등의 봉급표) 월지급액입니다. 2027년 인상률 3.9%는 2026년 9월 국무회의를 통과한 정부 예산안 수치이고, 국회 의결과 보수규정 개정 뒤 호봉별 금액이 확정됩니다. 2026년에도 저연차는 더 많이 올랐듯 실제 호봉별 인상률은 다를 수 있습니다.</p>
+    <div class="tbl-wrap" style="max-height:360px;overflow-y:auto"><table><thead><tr><th>호봉</th><th>2026년 (확정)</th><th>2027년 (예상)</th><th>차이</th></tr></thead><tbody>${rows.join('')}</tbody></table></div></details></section>`;
 }
 
 let tab = location.hash === '#allowance' ? 'allowance' : 'pension';
